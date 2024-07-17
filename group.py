@@ -11,7 +11,7 @@ api_hash = os.getenv('API_HASH')
 phone_number = os.getenv('PHONE_NUMBER')
 
 # 클라이언트 초기화
-client = TelegramClient('session_name', api_id, api_hash)
+client = TelegramClient('user_session', api_id, api_hash)
 
 async def main():
     await client.start(phone_number)

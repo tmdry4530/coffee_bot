@@ -1,6 +1,5 @@
 from telethon import TelegramClient, events
 from telethon.tl.types import User, MessageMediaPhoto
-from telethon.tl.functions.messages import ForwardMessagesRequest
 from dotenv import load_dotenv
 import os
 import re
@@ -21,14 +20,20 @@ load_dotenv()
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 bot_token = os.getenv('BOT_TOKEN')
-target_channel = int(os.getenv('TARGET_CHANNEL'))
+target_group = int(os.getenv('TARGET_GROUP'))
 excluded_group_ids = os.getenv('EXCLUDED_GROUP_IDS', '').split(',')
 
-# 클라이언트 초기화
-client = TelegramClient('session_name', api_id, api_hash)
+# 사용자 세션 초기화
+user_client = TelegramClient('user_session', api_id, api_hash)
+
+# 봇 세션 초기화
+bot_client = TelegramClient('bot_session', api_id, api_hash).start(bot_token=bot_token)
 
 keyword = 'open.kakao.com'  # 감지하고자 하는 키워드
 exclude_keyword = '하양이아빠'  # 제외할 키워드
+
+# 이미지 저장 디렉토리 설정
+image_dir = 'image/'
 
 # 실행 파일이 위치한 디렉토리 경로
 if getattr(sys, 'frozen', False):
@@ -43,7 +48,22 @@ def extract_urls(text):
     url_pattern = re.compile(r'(https?://\S+)')
     return url_pattern.findall(text)
 
-@client.on(events.NewMessage)
+def extract_hyperlink_urls(message):
+    urls = []
+    if message.entities:
+        for entity in message.entities:
+            if hasattr(entity, 'url'):
+                urls.append(entity.url)
+    return urls
+
+async def send_message_via_bot(bot_client, target_group, message_text, media=None):
+    try:
+        await bot_client.send_message(target_group, message_text, file=media)
+        logging.info(f"Bot sent message to {target_group}")
+    except Exception as e:
+        logging.error(f"Failed to send message: {e}")
+
+@user_client.on(events.NewMessage)
 async def handler(event):
     sender = await event.get_sender()
     sender_id = event.chat_id
@@ -66,6 +86,8 @@ async def handler(event):
 
     # 메시지에서 URL 추출
     urls = extract_urls(message_text)
+    # 메시지의 텍스트 하이퍼링크에서 URL 추출
+    urls.extend(extract_hyperlink_urls(event.message))
     
     # 메시지 미디어에서 URL 추출
     if event.message.media:
@@ -74,18 +96,29 @@ async def handler(event):
     
     # 특정 키워드가 포함된 링크가 있는지 확인
     keyword_urls = [url for url in urls if keyword in url]
+    
+    # 중복 제거
+    keyword_urls = list(set(keyword_urls))
 
     if keyword_urls:
-        # 메시지 포워딩
+        # 메시지 재구성 및 전송 (봇이 메시지 전송)
         try:
-            await client(ForwardMessagesRequest(
-                from_peer=event.chat_id,
-                id=[event.message.id],
-                to_peer=target_channel
-            ))
-            logging.info(f"Forwarded message to {target_channel}")
+            message_to_send = f"Keyword detected message:\n{message_text}\n\nLinks:\n"
+            for url in keyword_urls:
+                message_to_send += f"{url}\n"
+            
+            # 이미지가 있는 경우 이미지와 함께 전송
+            if event.message.media and isinstance(event.message.media, MessageMediaPhoto):
+                # 이미지 저장 디렉토리 생성
+                if not os.path.exists(image_dir):
+                    os.makedirs(image_dir)
+                
+                photo_path = await event.download_media(file=image_dir)
+                await send_message_via_bot(bot_client, target_group, message_to_send, media=photo_path)
+            else:
+                await send_message_via_bot(bot_client, target_group, message_to_send)
         except Exception as e:
-            logging.error(f"Failed to forward message: {e}")
+            logging.error(f"Failed to send message: {e}")
 
         # 키워드가 포함된 링크에 접속
         for url in keyword_urls:
@@ -104,13 +137,16 @@ async def handler(event):
                 logging.error(f'Failed to open URL: {e}')
 
 async def main():
-    async with client:
-        await client.start()
-        logging.info("Client Created")
-        await client.run_until_disconnected()
+    async with user_client, bot_client:
+        await user_client.start()
+        logging.info("User client started")
+        await bot_client.start(bot_token=bot_token)
+        logging.info("Bot client started")
+        await user_client.run_until_disconnected()
 
 if __name__ == '__main__':
     try:
-        client.loop.run_until_complete(main())
+        user_client.loop.run_until_complete(main())
     finally:
         driver.quit()
+        bot_client.disconnect()
