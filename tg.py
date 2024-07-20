@@ -9,33 +9,27 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 import time
 import logging
 import sys
+import pyautogui
 
-# 로그 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# .env 파일에서 환경 변수 로드
 load_dotenv()
 
-# API 설정
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 bot_token = os.getenv('BOT_TOKEN')
 target_group = int(os.getenv('TARGET_GROUP'))
 excluded_group_ids = os.getenv('EXCLUDED_GROUP_IDS', '').split(',')
 
-# 사용자 세션 초기화
 user_client = TelegramClient('user_session', api_id, api_hash)
 
-# 봇 세션 초기화
 bot_client = TelegramClient('bot_session', api_id, api_hash).start(bot_token=bot_token)
 
 keyword = 'open.kakao.com'  # 감지하고자 하는 키워드
-exclude_keyword = '하양이아빠'  # 제외할 키워드
+exclude_keywords = ['하양이아빠', 'XPLA', '크몽', '젬하다']  # 제외할 키워드 목록
 
-# 이미지 저장 디렉토리 설정
 image_dir = 'image/'
 
-# 실행 파일이 위치한 디렉토리 경로
 if getattr(sys, 'frozen', False):
     chromedriver_path = os.path.join(sys._MEIPASS, 'chromedriver-win64', 'chromedriver.exe')
 else:
@@ -63,25 +57,31 @@ async def send_message_via_bot(bot_client, target_group, message_text, media=Non
     except Exception as e:
         logging.error(f"Failed to send message: {e}")
 
+def perform_clicks():
+    coordinates = [(2037, 580), (2157, 306), (2048, 503)]
+    interval = 0.2
+
+    for x, y in coordinates:
+        pyautogui.moveTo(x, y, duration=0.1)
+        pyautogui.click()
+        time.sleep(interval)
+
 @user_client.on(events.NewMessage)
 async def handler(event):
     sender = await event.get_sender()
     sender_id = event.chat_id
 
-    # 발신자가 사용자이고, 봇이 보낸 메시지는 무시
     if isinstance(sender, User) and sender.bot:
         return
 
-    # 제외할 그룹 및 채널에서의 메시지는 무시
     if str(sender_id) in excluded_group_ids:
         logging.info(f"Message from excluded group/channel {sender_id} ignored.")
         return
 
     message_text = event.message.message
 
-    # 제외할 키워드가 포함된 메시지는 무시
-    if exclude_keyword in message_text:
-        logging.info(f"Message containing exclude keyword '{exclude_keyword}' ignored.")
+    if any(exclude_keyword in message_text for exclude_keyword in exclude_keywords):
+        logging.info(f"Message containing exclude keywords {exclude_keywords} ignored.")
         return
 
     # 메시지에서 URL 추출
@@ -125,12 +125,15 @@ async def handler(event):
             try:
                 driver.get(url)
                 logging.info(f'Opened URL: {url}')
-                time.sleep(3)  # 페이지 로드 대기
+                time.sleep(2.5)  # 페이지 로드 대기
                 # 버튼 클릭
                 try:
                     button = driver.find_element(By.CSS_SELECTOR, 'button')
                     button.click()
                     logging.info('Clicked the button')
+                    time.sleep(2.5)
+                    # 특정 좌표로 이동 및 클릭
+                    perform_clicks()
                 except Exception as e:
                     logging.error(f'Failed to click the button: {e}')
             except Exception as e:
